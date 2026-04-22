@@ -1,0 +1,68 @@
+// ===== 配置区域 =====
+var SPREADSHEET_URL = '你的 Google Sheet URL';  // 替换这里
+var SHEET_NAME = '广告消耗报告';
+var DATE_RANGE = 'LAST_7_DAYS';
+
+// ===== 脚本主体 =====
+function main() {
+  var spreadsheet = SpreadsheetApp.openByUrl(SPREADSHEET_URL);
+  var sheet = spreadsheet.getSheetByName(SHEET_NAME) 
+              || spreadsheet.insertSheet(SHEET_NAME);
+  
+  // 写入表头
+  sheet.clearContents();
+  sheet.appendRow([
+    '账号名称', '账号ID', '费用(元)', '展示次数', '点击次数', 
+    'CTR', '平均CPC', '转化次数', '日期范围', '更新时间'
+  ]);
+  
+  var accountIterator = AdsManagerApp.accounts().get();
+  while (accountIterator.hasNext()) {
+    var account = accountIterator.next();
+    AdsManagerApp.select(account);
+    
+    try {
+      // ✅ 修复：ACCOUNT_PERFORMANCE_REPORT 不能包含 CampaignName
+      var report = AdsApp.report(
+        'SELECT Cost, Impressions, Clicks, Ctr, AverageCpc, Conversions ' +
+        'FROM ACCOUNT_PERFORMANCE_REPORT ' +
+        'DURING ' + DATE_RANGE
+      );
+      
+      var rows = report.rows();
+      var totalCost = 0, totalImpressions = 0, totalClicks = 0, totalConversions = 0;
+      
+      while (rows.hasNext()) {
+        var row = rows.next();
+        totalCost += parseFloat(row['Cost']) || 0;
+        totalImpressions += parseInt(row['Impressions']) || 0;
+        totalClicks += parseInt(row['Clicks']) || 0;
+        totalConversions += parseFloat(row['Conversions']) || 0;
+      }
+      
+      var ctr = totalImpressions > 0 ? (totalClicks / totalImpressions * 100).toFixed(2) + '%' : '0%';
+      var avgCpc = totalClicks > 0 ? (totalCost / totalClicks).toFixed(2) : '0';
+      
+      sheet.appendRow([
+        account.getName(),
+        account.getCustomerId(),
+        totalCost.toFixed(2),
+        totalImpressions,
+        totalClicks,
+        ctr,
+        avgCpc,
+        totalConversions.toFixed(2),
+        DATE_RANGE,
+        new Date().toLocaleString('zh-CN')
+      ]);
+      
+      Logger.log('✅ 已处理账号: ' + account.getName());
+    } catch(e) {
+      Logger.log('❌ 账号 ' + account.getName() + ' 处理失败: ' + e.message);
+      sheet.appendRow([
+        account.getName(), account.getCustomerId(), '读取失败', 
+        '', '', '', '', '', DATE_RANGE, ''
+      ]);
+    }
+  }
+}
